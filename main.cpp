@@ -59,8 +59,6 @@ class Tokenizer {
             expr += consume();
         }
 
-        std::cout << expr << std::endl;
-
         if (peak() != ']') {
             throw std::runtime_error("end of bracket expression not found");
         }

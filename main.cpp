@@ -68,6 +68,7 @@ class Tokenizer {
         if (expr.empty()) {
             throw std::runtime_error("empty expression after bracket");
         }
+        consume();
 
         // TODO: compile this expression at lexing time
         tokens.emplace_back(expr, BracketExpression);
@@ -121,12 +122,12 @@ public:
     explicit Parser(std::vector<Token>& tokens, simdjson::ondemand::document& doc) : doc(doc), tokens(tokens), index(0) {}
 
     std::string_view parse() {
-        auto obj = doc.get_object();
+        auto obj = doc.get_value();
         if (obj.error()) {
             throw std::runtime_error("error while parsing document to json object: " + obj.error());
         }
 
-        auto curr_obj = obj.value_unsafe();
+        auto curr_obj = obj.value();
         while (!eof()) {
             switch (peak().get_type()) {
                 case Root: {
@@ -134,25 +135,27 @@ public:
                     break;
                 }
                 case Property: {
+                    switch (curr_obj.type()) {
+                        case simdjson::ondemand::json_type::string:
+                        case simdjson::ondemand::json_type::null:
+                        case simdjson::ondemand::json_type::number:
+                        case simdjson::ondemand::json_type::boolean: {
+                            throw std::runtime_error("ERROR: cannot access propery methods of scalar value. Property: " + std::string(peak().get_content()));
+                        }
+                        case simdjson::ondemand::json_type::array: {
+                            throw std::runtime_error("ERROR: cannot access property of array, use bracket expressions instead. Property: " + std::string(peak().get_content()));
+                        }
+                        default: break;
+                    }
                     const auto prop = consume();
                     const auto prop_name = prop.get_content();
-                    auto res = curr_obj.find_field(prop_name).value();
-
-                    if (res.is_scalar()) {
-                        if (!eof()) {
-                            throw std::runtime_error("found scalar value for property " + std::string(prop_name) + ", but there are remaining modifiers");
-                        }
-                        return res.get_string();
-                    }
-
-                    if (res.type() == simdjson::ondemand::json_type::array) {
-                        throw std::runtime_error("Property access is not allowed in array types, use bracket expressions instead");
-                    }
+                    const auto res = curr_obj.find_field(prop_name).value();
 
                     curr_obj = res;
                     break;
                 }
                 case BracketExpression: {
+                    std::cout << peak().get_content() << std::endl;
                     throw std::domain_error("feature non-implemented");
                 }
                 default: {
@@ -160,7 +163,7 @@ public:
                 }
             }
         }
-        return curr_obj.raw_json();
+        return simdjson::to_json_string(curr_obj);
     }
 };
 
@@ -174,7 +177,7 @@ int main() {
     }
 
     simdjson::ondemand::document doc = json_parser.iterate(json);
-    const std::string source = "$.user.name";
+    const std::string source = "$.user.locations[.name == 'Buenos Aires']";
 
     auto tokenizer = Tokenizer(source);
     auto tokens = tokenizer.get_tokens();
